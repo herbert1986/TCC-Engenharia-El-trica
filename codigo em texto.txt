@@ -1,0 +1,153 @@
+#include <OneWire.h> 
+#include <DallasTemperature.h>
+OneWire ourWire(4); //Se establece o pino 4 do ESP32 para a leitura do sensor de temperatura
+DallasTemperature DS18B20(&ourWire); 
+
+#include <WiFi.h>
+
+const char* ssid     = "nome da rede";
+const char* password = "senha da rede";
+
+WiFiServer server(80);
+
+ 
+const int sensorIn = 35;      // a porta onde o sensor está ligado
+int mVperAmp = 185;           // Para a versao de 5 A usa esse número
+int Watt = 0;
+double Voltage = 0;
+double VRMS = 0;
+double AmpsRMS = 0;
+ 
+void setup() {
+  Serial.begin (9600); 
+  DS18B20.begin(); //Inicia o sensor
+    delay(10);
+    // Ligando na rede wifi
+    Serial.println();
+    Serial.println();
+    Serial.print("Conectando ");
+    Serial.println(ssid);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("");
+    Serial.println("WiFi conectado.");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());    
+    server.begin();
+
+  delay(3000);
+}
+
+void loop() {
+  Serial.println (""); 
+ //parte do sensor de temperatura le e mostra no serial
+    DS18B20.requestTemperatures(); 
+    float tem= DS18B20.getTempCByIndex(0); 
+    Serial.print("Temperatura= ");
+    Serial.print(tem);
+    Serial.println(" °C");
+  
+  Voltage = getVPP();
+  VRMS = (Voltage/2.0) *0.707;  
+  AmpsRMS = ((VRMS * 1000)/mVperAmp)-0.3; //0.3 erro do meu sensor
+   if(AmpsRMS <0.49 )
+   {
+    AmpsRMS = 0;
+  Serial.print(AmpsRMS);
+  Serial.print(" Amps RMS  ---  ");
+  Watt = (AmpsRMS*110/1.2);
+
+  Serial.print(Watt);
+  Serial.println(" Watts");
+   }
+      else
+   {
+
+  Serial.print(AmpsRMS);
+  Serial.print(" Amps RMS  ---  ");
+  Watt = (AmpsRMS*110/1.2);
+  Serial.print(Watt);
+  Serial.println(" Watts");
+   }
+delay (1000);
+
+
+ ///////////////////////////////////////////////////////////////////////////////////////////////////
+ WiFiClient client = server.available();  
+  if (client) {                             // se vc conseguir a rede,
+    Serial.println("New Client.");           // mostre a mensagem
+    String currentLine = "";                
+    while (client.connected()) {            
+      if (client.available()) {             
+        char c = client.read();             
+        Serial.write(c);                    
+        if (c == '\n') {                    
+
+
+          if (currentLine.length() == 0) {
+
+               
+              client.print(AmpsRMS);
+              client.print(" Amps RMS  ---  ");
+              Watt = (AmpsRMS*110/1.2);
+              // note: 1.2 is my own empirically established calibration factor
+            // as the voltage measured at D34 depends on the length of the OUT-to-D34 wire
+            // 240 tensao da casa
+              client.print(Watt);
+              client.println(" Watts");
+
+              client.print("temp:");
+              client.print(tem);
+              client.print(" C");
+  
+            client.println();
+            
+            break;
+          } else {    
+            currentLine = "";
+          }
+        } else if (c != '\r') {  
+          currentLine += c;      
+        }
+      }
+    }
+    // feche a conexao
+    client.stop();
+    Serial.println("Cliente disconectado");
+  }
+}
+
+// ***** chama funcao ******
+float getVPP()
+{
+  float result;
+  int readValue;                // valor lido do sensor
+  int maxValue = 0;             // armazena o valor máximo
+  int minValue = 4096;          // armazena o valor minimo
+  
+   uint32_t start_time = millis();
+   while((millis()-start_time) < 1000) //amostra de 1 seg
+   {
+       readValue = analogRead(sensorIn);
+       // ver o novo valor
+       if (readValue > maxValue) 
+       {
+           /*Grava a corrente maxima do sensor*/
+           maxValue = readValue;
+       }
+       if (readValue < minValue) 
+       {
+           /*Grava a corrente minima do sensor*/
+           minValue = readValue;
+       }
+   }
+   
+   // Tira o valor maximo do minimo
+   result = ((maxValue - minValue) * 3.3)/4096.0; //ESP32 ADC resolucao 4096
+      
+   return result;
+ }
